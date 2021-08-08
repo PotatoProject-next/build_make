@@ -83,7 +83,7 @@ $(pcf_ignored_file): PRIVATE_IGNORED := $(sort $(product_copy_files_ignored))
 $(pcf_ignored_file):
 	echo "$(PRIVATE_IGNORED)" | tr " " "\n" >$@
 
-$(call dist-for-goals,droidcore,$(pcf_ignored_file):logs/$(notdir $(pcf_ignored_file)))
+$(call dist-for-goals,droidcore-unbundled,$(pcf_ignored_file):logs/$(notdir $(pcf_ignored_file)))
 
 pcf_ignored_file :=
 product_copy_files_ignored :=
@@ -586,7 +586,7 @@ $(BUILD_SYSTEM_STATS):
 	@rm -f $@
 	@$(foreach s,$(STATS.MODULE_TYPE),echo "modules_type_make,$(s),$(words $(STATS.MODULE_TYPE.$(s)))" >>$@;)
 	@$(foreach s,$(STATS.SOONG_MODULE_TYPE),echo "modules_type_soong,$(s),$(STATS.SOONG_MODULE_TYPE.$(s))" >>$@;)
-$(call dist-for-goals,droidcore,$(BUILD_SYSTEM_STATS))
+$(call dist-for-goals,droidcore-unbundled,$(BUILD_SYSTEM_STATS))
 
 # -----------------------------------------------------------------
 # build /product/etc/security/avb/system_other.avbpubkey if needed
@@ -611,7 +611,7 @@ SOONG_TO_CONVERT := $(PRODUCT_OUT)/soong_to_convert.txt
 $(SOONG_TO_CONVERT): $(SOONG_CONV_DATA) $(SOONG_TO_CONVERT_SCRIPT)
 	@rm -f $@
 	$(hide) $(SOONG_TO_CONVERT_SCRIPT) $< >$@
-$(call dist-for-goals,droidcore,$(SOONG_TO_CONVERT))
+$(call dist-for-goals,droidcore-unbundled,$(SOONG_TO_CONVERT))
 
 MK2BP_CATALOG_SCRIPT := build/make/tools/mk2bp_catalog.py
 MK2BP_REMAINING_HTML := $(PRODUCT_OUT)/mk2bp_remaining.html
@@ -625,7 +625,7 @@ $(MK2BP_REMAINING_HTML): $(SOONG_CONV_DATA) $(MK2BP_CATALOG_SCRIPT)
 		--out_dir="$(OUT_DIR)" \
 		--mode=html \
 		> $@
-$(call dist-for-goals,droidcore,$(MK2BP_REMAINING_HTML))
+$(call dist-for-goals,droidcore-unbundled,$(MK2BP_REMAINING_HTML))
 
 MK2BP_REMAINING_CSV := $(PRODUCT_OUT)/mk2bp_remaining.csv
 $(MK2BP_REMAINING_CSV): $(SOONG_CONV_DATA) $(MK2BP_CATALOG_SCRIPT)
@@ -635,7 +635,7 @@ $(MK2BP_REMAINING_CSV): $(SOONG_CONV_DATA) $(MK2BP_CATALOG_SCRIPT)
 		--out_dir="$(OUT_DIR)" \
 		--mode=csv \
 		> $@
-$(call dist-for-goals,droidcore,$(MK2BP_REMAINING_CSV))
+$(call dist-for-goals,droidcore-unbundled,$(MK2BP_REMAINING_CSV))
 
 # -----------------------------------------------------------------
 # Modules use -Wno-error, or added default -Wall -Werror
@@ -647,11 +647,11 @@ $(WALL_WERROR):
 	echo "# Modules added default -Wall" >> $@
 	for m in $(sort $(SOONG_MODULES_ADDED_WALL) $(MODULES_ADDED_WALL)); do echo $$m >> $@; done
 
-$(call dist-for-goals,droidcore,$(WALL_WERROR))
+$(call dist-for-goals,droidcore-unbundled,$(WALL_WERROR))
 
 # -----------------------------------------------------------------
 # C/C++ flag information for modules
-$(call dist-for-goals,droidcore,$(SOONG_MODULES_CFLAG_ARTIFACTS))
+$(call dist-for-goals,droidcore-unbundled,$(SOONG_MODULES_CFLAG_ARTIFACTS))
 
 # -----------------------------------------------------------------
 # Modules missing profile files
@@ -815,8 +815,13 @@ endif
 
 # We just build this directly to the install location.
 INSTALLED_RAMDISK_TARGET := $(BUILT_RAMDISK_TARGET)
+$(INSTALLED_RAMDISK_TARGET): PRIVATE_DIRS := debug_ramdisk dev metadata mnt proc second_stage_resources sys
 $(INSTALLED_RAMDISK_TARGET): $(MKBOOTFS) $(INTERNAL_RAMDISK_FILES) $(INSTALLED_FILES_FILE_RAMDISK) | $(COMPRESSION_COMMAND_DEPS)
 	$(call pretty,"Target ramdisk: $@")
+	$(hide) mkdir -p $(addprefix $(TARGET_RAMDISK_OUT)/,$(PRIVATE_DIRS))
+ifeq (true,$(BOARD_USES_GENERIC_KERNEL_IMAGE))
+	$(hide) mkdir -p $(addprefix $(TARGET_RAMDISK_OUT)/first_stage_ramdisk/,$(PRIVATE_DIRS))
+endif
 	$(hide) $(MKBOOTFS) -d $(TARGET_OUT) $(TARGET_RAMDISK_OUT) | $(COMPRESSION_COMMAND) > $@
 
 .PHONY: ramdisk-nodeps
@@ -1036,7 +1041,20 @@ else # TARGET_NO_KERNEL == "true"
 ifdef BOARD_PREBUILT_BOOTIMAGE
 INTERNAL_PREBUILT_BOOTIMAGE := $(BOARD_PREBUILT_BOOTIMAGE)
 INSTALLED_BOOTIMAGE_TARGET := $(PRODUCT_OUT)/boot.img
-$(eval $(call copy-one-file,$(INTERNAL_PREBUILT_BOOTIMAGE),$(INSTALLED_BOOTIMAGE_TARGET)))
+
+ifeq ($(BOARD_AVB_ENABLE),true)
+$(INSTALLED_BOOTIMAGE_TARGET): $(INTERNAL_PREBUILT_BOOTIMAGE) $(AVBTOOL) $(BOARD_AVB_BOOT_KEY_PATH)
+	cp $(INTERNAL_PREBUILT_BOOTIMAGE) $@
+	$(AVBTOOL) add_hash_footer \
+	    --image $@ \
+	    --partition_size $(BOARD_BOOTIMAGE_PARTITION_SIZE) \
+	    --partition_name boot $(INTERNAL_AVB_BOOT_SIGNING_ARGS) \
+	    $(BOARD_AVB_BOOT_ADD_HASH_FOOTER_ARGS)
+else
+$(INSTALLED_BOOTIMAGE_TARGET): $(INTERNAL_PREBUILT_BOOTIMAGE)
+	cp $(INTERNAL_PREBUILT_BOOTIMAGE) $@
+endif # BOARD_AVB_ENABLE
+
 else # BOARD_PREBUILT_BOOTIMAGE not defined
 INSTALLED_BOOTIMAGE_TARGET :=
 endif # BOARD_PREBUILT_BOOTIMAGE
@@ -1104,11 +1122,6 @@ ifdef INTERNAL_KERNEL_CMDLINE
 endif
 
 ifdef INTERNAL_BOOTCONFIG
-  ifneq (,$(findstring androidboot.hardware=, $(INTERNAL_BOOTCONFIG)))
-    $(error "androidboot.hardware" BOOTCONFIG parameter is not supported due \
-      to bootconfig limitations. Use "hardware" instead. INTERNAL_BOOTCONFIG: \
-      $(INTERNAL_BOOTCONFIG))
-  endif
   INTERNAL_VENDOR_BOOTCONFIG_TARGET := $(PRODUCT_OUT)/vendor-bootconfig.img
   $(INTERNAL_VENDOR_BOOTCONFIG_TARGET):
 	rm -f $@
@@ -1590,7 +1603,7 @@ $(if $(filter $(2),system),\
     $(if $(BOARD_SYSTEMIMAGE_PARTITION_SIZE),$(hide) echo "system_size=$(BOARD_SYSTEMIMAGE_PARTITION_SIZE)" >> $(1))
     $(if $(INTERNAL_SYSTEM_OTHER_PARTITION_SIZE),$(hide) echo "system_other_size=$(INTERNAL_SYSTEM_OTHER_PARTITION_SIZE)" >> $(1))
     $(if $(BOARD_SYSTEMIMAGE_FILE_SYSTEM_TYPE),$(hide) echo "system_fs_type=$(BOARD_SYSTEMIMAGE_FILE_SYSTEM_TYPE)" >> $(1))
-    $(if $(BOARD_SYSTEMIMAGE_FILE_SYSTEM_COMPRESS),$(hide) echo "system_fs_compress=$(BOARD_SYSTEMIMAGE_FILE_SYSTEM_COMPRESS)" >> $(1))
+    $(if $(BOARD_SYSTEMIMAGE_FILE_SYSTEM_COMPRESS),$(hide) echo "system_f2fs_compress=$(BOARD_SYSTEMIMAGE_FILE_SYSTEM_COMPRESS)" >> $(1))
     $(if $(BOARD_SYSTEMIMAGE_F2FS_SLOAD_COMPRESS_FLAGS),$(hide) echo "system_f2fs_sldc_flags=$(BOARD_SYSTEMIMAGE_F2FS_SLOAD_COMPRESS_FLAGS)" >> $(1))
     $(if $(BOARD_SYSTEMIMAGE_EXTFS_INODE_COUNT),$(hide) echo "system_extfs_inode_count=$(BOARD_SYSTEMIMAGE_EXTFS_INODE_COUNT)" >> $(1))
     $(if $(BOARD_SYSTEMIMAGE_EXTFS_RSV_PCT),$(hide) echo "system_extfs_rsv_pct=$(BOARD_SYSTEMIMAGE_EXTFS_RSV_PCT)" >> $(1))
@@ -1625,6 +1638,8 @@ $(if $(filter $(2),cache),\
 )
 $(if $(filter $(2),vendor),\
     $(if $(BOARD_VENDORIMAGE_FILE_SYSTEM_TYPE),$(hide) echo "vendor_fs_type=$(BOARD_VENDORIMAGE_FILE_SYSTEM_TYPE)" >> $(1))
+    $(if $(BOARD_VENDORIMAGE_FILE_SYSTEM_COMPRESS),$(hide) echo "vendor_f2fs_compress=$(BOARD_VENDORIMAGE_FILE_SYSTEM_COMPRESS)" >> $(1))
+    $(if $(BOARD_VENDORIMAGE_F2FS_SLOAD_COMPRESS_FLAGS),$(hide) echo "vendor_f2fs_sldc_flags=$(BOARD_VENDORIMAGE_F2FS_SLOAD_COMPRESS_FLAGS)" >> $(1))
     $(if $(BOARD_VENDORIMAGE_EXTFS_INODE_COUNT),$(hide) echo "vendor_extfs_inode_count=$(BOARD_VENDORIMAGE_EXTFS_INODE_COUNT)" >> $(1))
     $(if $(BOARD_VENDORIMAGE_EXTFS_RSV_PCT),$(hide) echo "vendor_extfs_rsv_pct=$(BOARD_VENDORIMAGE_EXTFS_RSV_PCT)" >> $(1))
     $(if $(BOARD_VENDORIMAGE_PARTITION_SIZE),$(hide) echo "vendor_size=$(BOARD_VENDORIMAGE_PARTITION_SIZE)" >> $(1))
@@ -1640,6 +1655,8 @@ $(if $(filter $(2),vendor),\
 )
 $(if $(filter $(2),product),\
     $(if $(BOARD_PRODUCTIMAGE_FILE_SYSTEM_TYPE),$(hide) echo "product_fs_type=$(BOARD_PRODUCTIMAGE_FILE_SYSTEM_TYPE)" >> $(1))
+    $(if $(BOARD_PRODUCTIMAGE_FILE_SYSTEM_COMPRESS),$(hide) echo "product_f2fs_compress=$(BOARD_PRODUCTIMAGE_FILE_SYSTEM_COMPRESS)" >> $(1))
+    $(if $(BOARD_PRODUCTIMAGE_F2FS_SLOAD_COMPRESS_FLAGS),$(hide) echo "product_f2fs_sldc_flags=$(BOARD_PRODUCTIMAGE_F2FS_SLOAD_COMPRESS_FLAGS)" >> $(1))
     $(if $(BOARD_PRODUCTIMAGE_EXTFS_INODE_COUNT),$(hide) echo "product_extfs_inode_count=$(BOARD_PRODUCTIMAGE_EXTFS_INODE_COUNT)" >> $(1))
     $(if $(BOARD_PRODUCTIMAGE_EXTFS_RSV_PCT),$(hide) echo "product_extfs_rsv_pct=$(BOARD_PRODUCTIMAGE_EXTFS_RSV_PCT)" >> $(1))
     $(if $(BOARD_PRODUCTIMAGE_PARTITION_SIZE),$(hide) echo "product_size=$(BOARD_PRODUCTIMAGE_PARTITION_SIZE)" >> $(1))
@@ -1655,6 +1672,8 @@ $(if $(filter $(2),product),\
 )
 $(if $(filter $(2),system_ext),\
     $(if $(BOARD_SYSTEM_EXTIMAGE_FILE_SYSTEM_TYPE),$(hide) echo "system_ext_fs_type=$(BOARD_SYSTEM_EXTIMAGE_FILE_SYSTEM_TYPE)" >> $(1))
+    $(if $(BOARD_SYSTEM_EXTIMAGE_FILE_SYSTEM_COMPRESS),$(hide) echo "system_ext_f2fs_compress=$(BOARD_SYSTEM_EXTIMAGE_FILE_SYSTEM_COMPRESS)" >> $(1))
+    $(if $(BOARD_SYSTEM_EXTIMAGE_F2FS_SLOAD_COMPRESS_FLAGS),$(hide) echo "system_ext_f2fs_sldc_flags=$(BOARD_SYSTEM_EXTIMAGE_F2FS_SLOAD_COMPRESS_FLAGS)" >> $(1))
     $(if $(BOARD_SYSTEM_EXTIMAGE_EXTFS_INODE_COUNT),$(hide) echo "system_ext_extfs_inode_count=$(BOARD_SYSTEM_EXTIMAGE_EXTFS_INODE_COUNT)" >> $(1))
     $(if $(BOARD_SYSTEM_EXTIMAGE_EXTFS_RSV_PCT),$(hide) echo "system_ext_extfs_rsv_pct=$(BOARD_SYSTEM_EXTIMAGE_EXTFS_RSV_PCT)" >> $(1))
     $(if $(BOARD_SYSTEM_EXTIMAGE_PARTITION_SIZE),$(hide) echo "system_ext_size=$(BOARD_SYSTEM_EXTIMAGE_PARTITION_SIZE)" >> $(1))
@@ -1684,6 +1703,8 @@ $(if $(filter $(2),odm),\
 )
 $(if $(filter $(2),vendor_dlkm),\
     $(if $(BOARD_VENDOR_DLKMIMAGE_FILE_SYSTEM_TYPE),$(hide) echo "vendor_dlkm_fs_type=$(BOARD_VENDOR_DLKMIMAGE_FILE_SYSTEM_TYPE)" >> $(1))
+    $(if $(BOARD_VENDOR_DLKMIMAGE_FILE_SYSTEM_COMPRESS),$(hide) echo "vendor_dlkm_f2fs_compress=$(BOARD_VENDOR_DLKMIMAGE_FILE_SYSTEM_COMPRESS)" >> $(1))
+    $(if $(BOARD_VENDOR_DLKMIMAGE_F2FS_SLOAD_COMPRESS_FLAGS),$(hide) echo "vendor_dlkm_f2fs_sldc_flags=$(BOARD_VENDOR_DLKMIMAGE_F2FS_SLOAD_COMPRESS_FLAGS)" >> $(1))
     $(if $(BOARD_VENDOR_DLKMIMAGE_EXTFS_INODE_COUNT),$(hide) echo "vendor_dlkm_extfs_inode_count=$(BOARD_VENDOR_DLKMIMAGE_EXTFS_INODE_COUNT)" >> $(1))
     $(if $(BOARD_VENDOR_DLKMIMAGE_EXTFS_RSV_PCT),$(hide) echo "vendor_dlkm_extfs_rsv_pct=$(BOARD_VENDOR_DLKMIMAGE_EXTFS_RSV_PCT)" >> $(1))
     $(if $(BOARD_VENDOR_DLKMIMAGE_PARTITION_SIZE),$(hide) echo "vendor_dlkm_size=$(BOARD_VENDOR_DLKMIMAGE_PARTITION_SIZE)" >> $(1))
@@ -3413,7 +3434,7 @@ endif # BOARD_PREBUILT_PVMFWIMAGE
 # $(INSTALLED_VENDORIMAGE_TARGET)" for "system vendor".
 # (1): list of partitions like "system", "vendor" or "system product system_ext".
 define images-for-partitions
-$(strip $(foreach item,$(1),$(INSTALLED_$(call to-upper,$(item))IMAGE_TARGET)))
+$(strip $(foreach item,$(1),$(if $(filter $(item),system_other),$(INSTALLED_SYSTEMOTHERIMAGE_TARGET),$(INSTALLED_$(call to-upper,$(item))IMAGE_TARGET))))
 endef
 
 # -----------------------------------------------------------------
@@ -4142,13 +4163,20 @@ ifeq (,$(TARGET_BUILD_UNBUNDLED))
 
 ifeq (true,$(PRODUCT_BUILD_SUPER_PARTITION))
 
+PARTITIONS_AND_OTHER_IN_SUPER := $(BOARD_SUPER_PARTITION_PARTITION_LIST)
+
+# Add the system other image to the misc_info. Because factory ota may install system_other to the super partition.
+ifdef BUILDING_SYSTEM_OTHER_IMAGE
+PARTITIONS_AND_OTHER_IN_SUPER += system_other
+endif # BUILDING_SYSTEM_OTHER_IMAGE
+
 # $(1): misc_info.txt
 # #(2): optional log file
 define check-all-partition-sizes-target
   mkdir -p $(dir $(1))
   rm -f $(1)
   $(call dump-super-image-info, $(1))
-  $(foreach partition,$(BOARD_SUPER_PARTITION_PARTITION_LIST), \
+  $(foreach partition,$(PARTITIONS_AND_OTHER_IN_SUPER), \
     echo "$(partition)_image="$(call images-for-partitions,$(partition)) >> $(1);)
   $(CHECK_PARTITION_SIZES) $(if $(2),--logfile $(2),-v) $(1)
 endef
@@ -4159,7 +4187,7 @@ $(call dist-for-goals, droid_targets, $(check_all_partition_sizes_log))
 
 $(check_all_partition_sizes_log): \
     $(CHECK_PARTITION_SIZES) \
-    $(call images-for-partitions,$(BOARD_SUPER_PARTITION_PARTITION_LIST))
+    $(call images-for-partitions,$(PARTITIONS_AND_OTHER_IN_SUPER))
 	$(call check-all-partition-sizes-target, \
 	  $(call intermediates-dir-for,PACKAGING,check-all-partition-sizes)/misc_info.txt, \
 	  $@)
@@ -4220,7 +4248,6 @@ INTERNAL_OTATOOLS_MODULES := \
   aapt2 \
   adb \
   add_img_to_target_files \
-  aftltool \
   apksigner \
   append2simg \
   avbtool \
@@ -4243,6 +4270,7 @@ INTERNAL_OTATOOLS_MODULES := \
   e2fsdroid \
   fc_sort \
   fec \
+  fsck.f2fs \
   fs_config \
   generate_verity_key \
   host_init_verifier \
@@ -4583,7 +4611,7 @@ endif
 .PHONY: misc_info
 misc_info: $(INSTALLED_MISC_INFO_TARGET)
 
-droidcore: $(INSTALLED_MISC_INFO_TARGET)
+droidcore-unbundled: $(INSTALLED_MISC_INFO_TARGET)
 
 # -----------------------------------------------------------------
 # A zip of the directories that map to the target filesystem.
@@ -4763,6 +4791,7 @@ endif
 ifdef BUILDING_VENDOR_BOOT_IMAGE
   $(BUILT_TARGET_FILES_PACKAGE): $(INTERNAL_VENDOR_RAMDISK_FILES)
   $(BUILT_TARGET_FILES_PACKAGE): $(INTERNAL_VENDOR_RAMDISK_FRAGMENT_TARGETS)
+  $(BUILT_TARGET_FILES_PACKAGE): $(INTERNAL_VENDOR_BOOTCONFIG_TARGET)
   # The vendor ramdisk may be built from the recovery ramdisk.
   ifeq (true,$(BOARD_MOVE_RECOVERY_RESOURCES_TO_VENDOR_BOOT))
     $(BUILT_TARGET_FILES_PACKAGE): $(INTERNAL_RECOVERY_RAMDISK_FILES_TIMESTAMP)
@@ -4836,7 +4865,7 @@ endif
 
 ifdef BOARD_PREBUILT_BOOTLOADER
 $(BUILT_TARGET_FILES_PACKAGE): $(INSTALLED_BOOTLOADER_MODULE)
-droidcore: $(INSTALLED_BOOTLOADER_MODULE)
+droidcore-unbundled: $(INSTALLED_BOOTLOADER_MODULE)
 endif
 
 # Depending on the various images guarantees that the underlying
@@ -5133,12 +5162,17 @@ ifdef BOARD_PREBUILT_SYSTEM_EXTIMAGE
 	$(hide) mkdir -p $(zip_root)/IMAGES
 	$(hide) cp $(INSTALLED_SYSTEM_EXTIMAGE_TARGET) $(zip_root)/IMAGES/
 endif
+ifndef BOARD_PREBUILT_BOOTIMAGE
 ifneq (,$(INTERNAL_PREBUILT_BOOTIMAGE) $(filter true,$(BOARD_COPY_BOOT_IMAGE_TO_TARGET_FILES)))
 ifdef INSTALLED_BOOTIMAGE_TARGET
 	$(hide) mkdir -p $(zip_root)/IMAGES
 	$(hide) cp $(INSTALLED_BOOTIMAGE_TARGET) $(zip_root)/IMAGES/
 endif # INSTALLED_BOOTIMAGE_TARGET
 endif # INTERNAL_PREBUILT_BOOTIMAGE != "" || BOARD_COPY_BOOT_IMAGE_TO_TARGET_FILES == true
+else # BOARD_PREBUILT_BOOTIMAGE is defined
+	$(hide) mkdir -p $(zip_root)/PREBUILT_IMAGES
+	$(hide) cp $(INSTALLED_BOOTIMAGE_TARGET) $(zip_root)/PREBUILT_IMAGES/
+endif # BOARD_PREBUILT_BOOTIMAGE
 ifdef BOARD_PREBUILT_ODMIMAGE
 	$(hide) mkdir -p $(zip_root)/IMAGES
 	$(hide) cp $(INSTALLED_ODMIMAGE_TARGET) $(zip_root)/IMAGES/
@@ -5425,7 +5459,7 @@ ifeq (true,$(CLANG_COVERAGE))
   $(PROFDATA_ZIP): $(SOONG_ZIP)
 	$(hide) $(SOONG_ZIP) -d -o $@ -C $(LLVM_PREBUILTS_BASE)/linux-x86/$(LLVM_PREBUILTS_VERSION) -f $(LLVM_PROFDATA) -f $(LIBCXX)
 
-  $(call dist-for-goals,droidcore,$(PROFDATA_ZIP))
+  $(call dist-for-goals,droidcore-unbundled,$(PROFDATA_ZIP))
 endif
 
 # -----------------------------------------------------------------
@@ -5604,7 +5638,7 @@ $(INSTALLED_SUPERIMAGE_TARGET): $(INSTALLED_SUPERIMAGE_DEPENDENCIES)
 	$(call build-superimage-target,$(INSTALLED_SUPERIMAGE_TARGET),\
           $(call intermediates-dir-for,PACKAGING,superimage_debug)/misc_info.txt)
 
-droidcore: $(INSTALLED_SUPERIMAGE_TARGET)
+droidcore-unbundled: $(INSTALLED_SUPERIMAGE_TARGET)
 
 # For devices that uses super image directly, the superimage target points to the file in $(PRODUCT_OUT).
 .PHONY: superimage
@@ -5690,7 +5724,7 @@ $(INSTALLED_QEMU_SYSTEMIMAGE): $(INSTALLED_VBMETAIMAGE_TARGET) $(MK_COMBINE_QEMU
      $(MK_COMBINE_QEMU_IMAGE) -i $(INSTALLED_SYSTEM_QEMU_CONFIG) -o $@)
 
 systemimage: $(INSTALLED_QEMU_SYSTEMIMAGE)
-droidcore: $(INSTALLED_QEMU_SYSTEMIMAGE)
+droidcore-unbundled: $(INSTALLED_QEMU_SYSTEMIMAGE)
 endif
 ifdef INSTALLED_VENDORIMAGE_TARGET
 INSTALLED_QEMU_VENDORIMAGE := $(PRODUCT_OUT)/vendor-qemu.img
@@ -5699,7 +5733,7 @@ $(INSTALLED_QEMU_VENDORIMAGE): $(INSTALLED_VENDORIMAGE_TARGET) $(MK_QEMU_IMAGE_S
 	(export SGDISK=$(SGDISK_HOST) SIMG2IMG=$(SIMG2IMG); $(MK_QEMU_IMAGE_SH) $(INSTALLED_VENDORIMAGE_TARGET))
 
 vendorimage: $(INSTALLED_QEMU_VENDORIMAGE)
-droidcore: $(INSTALLED_QEMU_VENDORIMAGE)
+droidcore-unbundled: $(INSTALLED_QEMU_VENDORIMAGE)
 endif
 
 ifdef INSTALLED_RAMDISK_TARGET
@@ -5710,7 +5744,7 @@ $(INSTALLED_QEMU_RAMDISKIMAGE): $(INTERNAL_VENDOR_RAMDISK_TARGET) $(INSTALLED_RA
 	@echo Create ramdisk-qemu.img
 	(cat $(INSTALLED_RAMDISK_TARGET) $(INTERNAL_VENDOR_RAMDISK_TARGET) > $(INSTALLED_QEMU_RAMDISKIMAGE))
 
-droidcore: $(INSTALLED_QEMU_RAMDISKIMAGE)
+droidcore-unbundled: $(INSTALLED_QEMU_RAMDISKIMAGE)
 endif
 endif
 endif
@@ -5722,7 +5756,7 @@ $(INSTALLED_QEMU_PRODUCTIMAGE): $(INSTALLED_PRODUCTIMAGE_TARGET) $(MK_QEMU_IMAGE
 	(export SGDISK=$(SGDISK_HOST) SIMG2IMG=$(SIMG2IMG); $(MK_QEMU_IMAGE_SH) $(INSTALLED_PRODUCTIMAGE_TARGET))
 
 productimage: $(INSTALLED_QEMU_PRODUCTIMAGE)
-droidcore: $(INSTALLED_QEMU_PRODUCTIMAGE)
+droidcore-unbundled: $(INSTALLED_QEMU_PRODUCTIMAGE)
 endif
 ifdef INSTALLED_SYSTEM_EXTIMAGE_TARGET
 INSTALLED_QEMU_SYSTEM_EXTIMAGE := $(PRODUCT_OUT)/system_ext-qemu.img
@@ -5731,7 +5765,7 @@ $(INSTALLED_QEMU_SYSTEM_EXTIMAGE): $(INSTALLED_SYSTEM_EXTIMAGE_TARGET) $(MK_QEMU
 	(export SGDISK=$(SGDISK_HOST) SIMG2IMG=$(SIMG2IMG); $(MK_QEMU_IMAGE_SH) $(INSTALLED_SYSTEM_EXTIMAGE_TARGET))
 
 systemextimage: $(INSTALLED_QEMU_SYSTEM_EXTIMAGE)
-droidcore: $(INSTALLED_QEMU_SYSTEM_EXTIMAGE)
+droidcore-unbundled: $(INSTALLED_QEMU_SYSTEM_EXTIMAGE)
 endif
 ifdef INSTALLED_ODMIMAGE_TARGET
 INSTALLED_QEMU_ODMIMAGE := $(PRODUCT_OUT)/odm-qemu.img
@@ -5740,7 +5774,7 @@ $(INSTALLED_QEMU_ODMIMAGE): $(INSTALLED_ODMIMAGE_TARGET) $(MK_QEMU_IMAGE_SH) $(S
 	(export SGDISK=$(SGDISK_HOST); $(MK_QEMU_IMAGE_SH) $(INSTALLED_ODMIMAGE_TARGET))
 
 odmimage: $(INSTALLED_QEMU_ODMIMAGE)
-droidcore: $(INSTALLED_QEMU_ODMIMAGE)
+droidcore-unbundled: $(INSTALLED_QEMU_ODMIMAGE)
 endif
 
 ifdef INSTALLED_VENDOR_DLKMIMAGE_TARGET
@@ -5750,7 +5784,7 @@ $(INSTALLED_QEMU_VENDOR_DLKMIMAGE): $(INSTALLED_VENDOR_DLKMIMAGE_TARGET) $(MK_QE
 	(export SGDISK=$(SGDISK_HOST); $(MK_QEMU_IMAGE_SH) $(INSTALLED_VENDOR_DLKMIMAGE_TARGET))
 
 vendor_dlkmimage: $(INSTALLED_QEMU_VENDOR_DLKMIMAGE)
-droidcore: $(INSTALLED_QEMU_VENDOR_DLKMIMAGE)
+droidcore-unbundled: $(INSTALLED_QEMU_VENDOR_DLKMIMAGE)
 endif
 
 ifdef INSTALLED_ODM_DLKMIMAGE_TARGET
@@ -5760,7 +5794,7 @@ $(INSTALLED_QEMU_ODM_DLKMIMAGE): $(INSTALLED_ODM_DLKMIMAGE_TARGET) $(MK_QEMU_IMA
 	(export SGDISK=$(SGDISK_HOST); $(MK_QEMU_IMAGE_SH) $(INSTALLED_ODM_DLKMIMAGE_TARGET))
 
 odm_dlkmimage: $(INSTALLED_QEMU_ODM_DLKMIMAGE)
-droidcore: $(INSTALLED_QEMU_ODM_DLKMIMAGE)
+droidcore-unbundled: $(INSTALLED_QEMU_ODM_DLKMIMAGE)
 endif
 
 QEMU_VERIFIED_BOOT_PARAMS := $(PRODUCT_OUT)/VerifiedBootParams.textproto
@@ -5771,7 +5805,7 @@ $(QEMU_VERIFIED_BOOT_PARAMS): $(INSTALLED_VBMETAIMAGE_TARGET) $(INSTALLED_SYSTEM
     $(INSTALLED_SYSTEMIMAGE_TARGET) $(QEMU_VERIFIED_BOOT_PARAMS))
 
 systemimage: $(QEMU_VERIFIED_BOOT_PARAMS)
-droidcore: $(QEMU_VERIFIED_BOOT_PARAMS)
+droidcore-unbundled: $(QEMU_VERIFIED_BOOT_PARAMS)
 
 endif
 # -----------------------------------------------------------------
