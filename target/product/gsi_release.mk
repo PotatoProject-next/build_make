@@ -71,3 +71,10 @@ PRODUCT_BUILD_USERDATA_IMAGE := false
 PRODUCT_BUILD_VENDOR_IMAGE := false
 PRODUCT_BUILD_SUPER_PARTITION := false
 PRODUCT_BUILD_SUPER_EMPTY_IMAGE := false
+
+# Always build modules from source
+MODULE_BUILD_FROM_SOURCE := true
+
+# Additional settings used in all GSI builds
+PRODUCT_PRODUCT_PROPERTIES += \
+    ro.crypto.metadata_init_delete_all_keys.enabled=false \

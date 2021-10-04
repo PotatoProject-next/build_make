@@ -43,6 +43,12 @@ assert_eq("abcZ", rblf.mkpatsubst("%z", "%Z", "abcz"))
 assert_eq("azx b", rblf.mkpatsubst("az", "AZ", "azx  b"))
 assert_eq(["azx", "b"], rblf.mkpatsubst("az", "AZ", ["azx", "b"]))
 assert_eq("ABC", rblf.mkpatsubst("abc", "ABC", "abc"))
+assert_eq(["%/foo"], rblf.mkpatsubst("%", "\\%/%", ["foo"]))
+assert_eq(["foo/%"], rblf.mkpatsubst("%", "%/%", ["foo"]))
+assert_eq(["from/a:to/a", "from/b:to/b"], rblf.product_copy_files_by_pattern("from/%", "to/%", "a b"))
+
+assert_eq([], rblf.filter(["a", "", "b"], "f"))
+assert_eq(["", "b"], rblf.filter_out(["a", "" ], ["a", "", "b"] ))
 
 globals, config = rblf.product_configuration("test/device", init)
 assert_eq(
@@ -50,8 +56,12 @@ assert_eq(
       "PRODUCT_COPY_FILES": [
           "part_from:part_to",
           "device_from:device_to",
-          "device/google/redfin/audio/audio_platform_info_noextcodec_snd.xml:||VENDOR-PATH-PH||/etc/audio_platform_info_noextcodec_snd.xml",
-          "xyz"
+          "device/google/redfin/audio/audio_platform_info_noextcodec_snd.xml:||VENDOR-PATH-PH||/etc/audio/audio_platform_info_noextcodec_snd.xml",
+          "xyz:/etc/xyz",
+          "x.xml:/etc/x.xml",
+          "y.xml:/etc/y.xml",
+          "from/sub/x:to/x",
+          "from/sub/y:to/y",
       ],
       "PRODUCT_HOST_PACKAGES": ["host"],
       "PRODUCT_PACKAGES": [
@@ -62,4 +72,18 @@ assert_eq(
       "PRODUCT_PRODUCT_PROPERTIES": ["part_properties"]
     },
     { k:v for k, v in sorted(config.items()) }
+)
+
+ns = globals["$SOONG_CONFIG_NAMESPACES"]
+assert_eq(
+    {
+        "NS1": {
+            "v1": "abc",
+            "v2": "def"
+        },
+        "NS2": {
+            "v3": "xyz"
+        }
+    },
+    {k:v for k, v in sorted(ns.items()) }
 )

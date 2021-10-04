@@ -27,6 +27,7 @@ $(call add_json_str,  Platform_version_name,             $(PLATFORM_VERSION))
 $(call add_json_val,  Platform_sdk_version,              $(PLATFORM_SDK_VERSION))
 $(call add_json_str,  Platform_sdk_codename,             $(PLATFORM_VERSION_CODENAME))
 $(call add_json_bool, Platform_sdk_final,                $(filter REL,$(PLATFORM_VERSION_CODENAME)))
+$(call add_json_val,  Platform_sdk_extension_version,    $(PLATFORM_SDK_EXTENSION_VERSION))
 $(call add_json_csv,  Platform_version_active_codenames, $(PLATFORM_VERSION_ALL_CODENAMES))
 $(call add_json_str,  Platform_security_patch,           $(PLATFORM_SECURITY_PATCH))
 $(call add_json_str,  Platform_preview_sdk_version,      $(PLATFORM_PREVIEW_SDK_VERSION))
@@ -37,6 +38,7 @@ $(call add_json_str,  Platform_min_supported_target_sdk_version, $(PLATFORM_MIN_
 $(call add_json_bool, Allow_missing_dependencies,        $(filter true,$(ALLOW_MISSING_DEPENDENCIES)))
 $(call add_json_bool, Unbundled_build,                   $(TARGET_BUILD_UNBUNDLED))
 $(call add_json_bool, Unbundled_build_apps,              $(TARGET_BUILD_APPS))
+$(call add_json_bool, Unbundled_build_image,             $(TARGET_BUILD_UNBUNDLED_IMAGE))
 $(call add_json_bool, Always_use_prebuilt_sdks,          $(TARGET_BUILD_USE_PREBUILT_SDKS))
 $(call add_json_bool, Skip_boot_jars_check,              $(SKIP_BOOT_JARS_CHECK))
 
@@ -72,6 +74,7 @@ $(call add_json_str,  NativeBridgeSecondaryRelativePath, $(TARGET_NATIVE_BRIDGE_
 $(call add_json_str,  HostArch,                          $(HOST_ARCH))
 $(call add_json_str,  HostSecondaryArch,                 $(HOST_2ND_ARCH))
 $(call add_json_bool, HostStaticBinaries,                $(BUILD_HOST_static))
+$(call add_json_bool, HostMusl,                          $(USE_HOST_MUSL))
 
 $(call add_json_str,  CrossHost,                         $(HOST_CROSS_OS))
 $(call add_json_str,  CrossHostArch,                     $(HOST_CROSS_ARCH))
@@ -141,7 +144,7 @@ $(call add_json_bool, UncompressPrivAppDex,              $(call invert_bool,$(fi
 $(call add_json_list, ModulesLoadedByPrivilegedModules,  $(PRODUCT_LOADED_BY_PRIVILEGED_MODULES))
 
 $(call add_json_list, BootJars,                          $(PRODUCT_BOOT_JARS))
-$(call add_json_list, UpdatableBootJars,                 $(PRODUCT_UPDATABLE_BOOT_JARS))
+$(call add_json_list, ApexBootJars,                      $(PRODUCT_APEX_BOOT_JARS))
 
 $(call add_json_bool, VndkUseCoreVariant,                $(TARGET_VNDK_USE_CORE_VARIANT))
 $(call add_json_bool, VndkSnapshotBuildArtifacts,        $(VNDK_SNAPSHOT_BUILD_ARTIFACTS))
